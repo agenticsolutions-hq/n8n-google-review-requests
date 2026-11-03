@@ -1,0 +1,1906 @@
+{
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "name": "Post-Visit Google Review Request with Opt-Out",
+  "tags": [],
+  "nodes": [
+    {
+      "id": "ac62f4bf-9579-5fff-9dd0-6e1e16513031",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "typeVersion": 1.2
+    },
+    {
+      "id": "70841e4a-9eb5-5c99-8587-ff01f6370dd8",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ee7e9f00-20fb-5264-8eef-aa19afbcaf73",
+              "name": "now",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "id": "698ee2af-f187-55d7-a190-661d12fec775",
+              "name": "run_started_ms",
+              "type": "string",
+              "value": "={{ $now.toMillis() }}"
+            },
+            {
+              "id": "bcc0e384-4292-5ffd-9485-e32886275555",
+              "name": "spreadsheet_url",
+              "type": "string",
+              "value": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
+            },
+            {
+              "id": "6a996377-9ee5-52eb-98d3-9a94c20233a7",
+              "name": "timezone",
+              "type": "string",
+              "value": "America/New_York"
+            },
+            {
+              "id": "34418c7a-69e5-55b0-9a75-8e26f9037452",
+              "name": "business_name",
+              "type": "string",
+              "value": "Your Business"
+            },
+            {
+              "id": "b51833ca-df40-57b4-ab94-e860d6de182e",
+              "name": "from_email",
+              "type": "string",
+              "value": "hello@example.com"
+            },
+            {
+              "id": "910879b2-bcdf-5231-9d70-fa79fdbb118b",
+              "name": "owner_email",
+              "type": "string",
+              "value": "user@example.com"
+            },
+            {
+              "id": "83b27fd3-2c3b-50d4-9f57-c2c90be1ef1b",
+              "name": "review_link",
+              "type": "string",
+              "value": "https://g.page/r/YOUR_REVIEW_ID/review"
+            },
+            {
+              "id": "b7e16aca-504f-5c8c-a05e-1015a07caad9",
+              "name": "delay_hours",
+              "type": "number",
+              "value": 3
+            },
+            {
+              "id": "c025c18d-e2bd-5026-8ea4-5d2423c80ffc",
+              "name": "max_age_days",
+              "type": "number",
+              "value": 14
+            },
+            {
+              "id": "c2e602b6-9d36-58ad-acba-1aa979b816fb",
+              "name": "quiet_hours_start",
+              "type": "number",
+              "value": 21
+            },
+            {
+              "id": "4b51dcb4-47b2-574d-a36b-ece9e5655d0e",
+              "name": "quiet_hours_end",
+              "type": "number",
+              "value": 8
+            },
+            {
+              "id": "fa886aa8-6ba2-52a8-a6cc-d59798bb1572",
+              "name": "optout_url",
+              "type": "string",
+              "value": "https://YOUR-N8N-HOST/webhook/review-unsubscribe"
+            },
+            {
+              "id": "0d788b33-c1ab-5da7-a3f6-0e91237bdb13",
+              "name": "optout_secret",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "e401f38f-8eb9-5d34-8c47-1d65c0ccab40",
+      "name": "Read Visits",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "date": "SERIAL_NUMBER",
+              "general": "UNFORMATTED_VALUE"
+            }
+          }
+        },
+        "operation": "read",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config').first().json.spreadsheet_url }}"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "1f7eca50-0297-5c2d-8c9a-cee261c3a43d",
+      "name": "Select visits to ask",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst cfg = $('Config').first().json;\nconst truthy = v => ['true','yes','y','1','x'].includes(String(v ?? '').trim().toLowerCase());\nconst esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst now = cfg.now ? DateTime.fromISO(String(cfg.now), { setZone: true }) : DateTime.now();\nconst EMAIL_RE = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\n// Dates: ISO text, yyyy-MM-dd HH:mm, Google Sheets serial numbers (e.g. 46316.33) and common formatted dates.\nconst FORMATS = ['yyyy-MM-dd H:mm', 'yyyy-MM-dd H:mm:ss', 'yyyy/MM/dd H:mm', 'yyyy/MM/dd H:mm:ss', 'yyyy/MM/dd',\n  'd LLL yyyy H:mm', 'd LLL yyyy', 'd LLLL yyyy H:mm', 'd LLLL yyyy', 'LLL d, yyyy h:mm a', 'LLL d, yyyy', 'LLLL d, yyyy h:mm a', 'LLLL d, yyyy',\n  'd.M.yyyy H:mm', 'd.M.yyyy H:mm:ss', 'd.M.yyyy'];\nfunction parseDT(v, zone) {\n  if (v === undefined || v === null || String(v).trim() === '') return DateTime.invalid('empty');\n  if (typeof v === 'number' || /^\\d{5}(\\.\\d+)?$/.test(String(v).trim())) {\n    const n = Number(v);\n    if (!(n > 20000 && n < 80000)) return DateTime.invalid('not a date serial number');\n    const u = DateTime.fromMillis(Math.round((n - 25569) * 86400000), { zone: 'UTC' });\n    return DateTime.fromObject({ year: u.year, month: u.month, day: u.day, hour: u.hour, minute: u.minute, second: u.second }, { zone });\n  }\n  const s = String(v).trim();\n  if (/[zZ]$|[+-]\\d\\d:?\\d\\d$/.test(s)) return DateTime.fromISO(s.replace(' ', 'T'), { setZone: true });\n  let d = DateTime.fromISO(s.replace(' ', 'T'), { zone });\n  for (const f of FORMATS) { if (d.isValid) break; d = DateTime.fromFormat(s, f, { zone, locale: 'en-US' }); }\n  if (!d.isValid) {\n    const m = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:[ T](\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp][Mm])?)?$/);\n    if (m) {\n      // 13/10/2026 is day-first and 10/13/2026 month-first; 10/11/2026 could be either, so it is rejected.\n      const a = +m[1], b = +m[2];\n      let month, day;\n      if (a > 12 && b <= 12) { day = a; month = b; } else if (b > 12 && a <= 12) { month = a; day = b; } else if (a === b) { month = a; day = b; }\n      else return DateTime.invalid('day/month order is ambiguous');\n      let h = m[4] ? +m[4] : 0;\n      if (m[7]) { const pm = /p/i.test(m[7]); if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }\n      d = DateTime.fromObject({ year: +m[3], month, day, hour: h, minute: m[5] ? +m[5] : 0, second: m[6] ? +m[6] : 0 }, { zone });\n    }\n  }\n  return d;\n}\nconst rowsOf = node => $(node).all().map(i => i.json).filter(r => r && Object.keys(r).length);\n\nconst MAX_ATTEMPTS = 3;\nfunction sendState(v) {\n  const s = String(v ?? '').trim().toLowerCase();\n  if (s.startsWith('sending')) return { claimed: true, attempts: 0, gaveUp: false };\n  const m = s.match(/^failed (\\d+)/);\n  const attempts = m ? parseInt(m[1], 10) : 0;\n  return { claimed: false, attempts, gaveUp: attempts >= MAX_ATTEMPTS };\n}\n// The persisted owner is this n8n execution ID, with a state prefix only.\nconst claimToken = () => `sending ${$execution.id}`;\nconst failStatus = attempts => attempts + 1 >= MAX_ATTEMPTS ? `failed ${MAX_ATTEMPTS}/${MAX_ATTEMPTS} - gave up` : `failed ${attempts + 1}/${MAX_ATTEMPTS}`;\n// Rows grouped by ID. Sheet updates always change the first row with a given ID, so only that row is used.\nfunction groupById(rows, key) {\n  const m = new Map();\n  for (const row of rows) { const id = String(row[key] ?? '').trim(); if (!id) continue; if (!m.has(id)) m.set(id, []); m.get(id).push(row); }\n  return m;\n}\nfunction report(title, problems) {\n  const text = `${title}: ${problems.length} row(s) need attention. ` + problems.join(' | ');\n  return { json: { _kind: 'report', alert_text: text, alert_subject: `[Alert] ${title}: ${problems.length} row(s) need attention`,\n    alert_html: `<p><b>${esc(title)}</b>: ${problems.length} row(s) need attention.</p><ul>` + problems.map(p => `<li>${esc(p)}</li>`).join('') + '</ul>' } };\n}\n\nfunction hmacHex(key, msg) {\n  const bytes = s => { const u = unescape(encodeURIComponent(String(s))); const a = []; for (let i = 0; i < u.length; i++) a.push(u.charCodeAt(i)); return a; };\n  const sha256 = data => {\n    const rr = (v, n) => (v >>> n) | (v << (32 - n)), H = [], K = [];\n    for (let c = 2, n = 0; n < 64; c++) {\n      let prime = true; for (let d = 2; d * d <= c; d++) if (c % d === 0) { prime = false; break; }\n      if (!prime) continue;\n      if (n < 8) H[n] = (Math.pow(c, 1 / 2) * 4294967296) | 0;\n      K[n++] = (Math.pow(c, 1 / 3) * 4294967296) | 0;\n    }\n    const m = data.slice(), len = data.length * 8;\n    m.push(0x80); while (m.length % 64 !== 56) m.push(0);\n    const hi = Math.floor(len / 4294967296), lo = len >>> 0;\n    for (const v of [hi, lo]) m.push((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255);\n    for (let o = 0; o < m.length; o += 64) {\n      const w = [];\n      for (let i = 0; i < 16; i++) w[i] = (m[o + 4 * i] << 24) | (m[o + 4 * i + 1] << 16) | (m[o + 4 * i + 2] << 8) | m[o + 4 * i + 3];\n      for (let i = 16; i < 64; i++) w[i] = (w[i - 16] + (rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3)) + w[i - 7] + (rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10))) | 0;\n      let [a, b, c, d, e, f, g, h] = H;\n      for (let i = 0; i < 64; i++) {\n        const t1 = (h + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;\n        const t2 = ((rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;\n        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;\n      }\n      [a, b, c, d, e, f, g, h].forEach((v, i) => { H[i] = (H[i] + v) | 0; });\n    }\n    const out = []; for (const v of H) out.push((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255);\n    return out;\n  };\n  let k = bytes(key); if (k.length > 64) k = sha256(k);\n  while (k.length < 64) k.push(0);\n  const inner = sha256(k.map(x => x ^ 0x36).concat(bytes(msg)));\n  return sha256(k.map(x => x ^ 0x5c).concat(inner)).map(x => (x < 16 ? '0' : '') + x.toString(16)).join('');\n}\n\nconst out = [], problems = [];\nconst delay = Number(cfg.delay_hours) || 0, maxAge = Number(cfg.max_age_days) || 14;\nconst localNow = now.setZone(cfg.timezone || 'UTC');\nconst qs = Number(cfg.quiet_hours_start), qe = Number(cfg.quiet_hours_end);\nconst quiet = qs > qe ? (localNow.hour >= qs || localNow.hour < qe) : (localNow.hour >= qs && localNow.hour < qe);\nif (quiet) return [];\n// Nothing is sent until the unsubscribe link can work.\nconst optUrl = String(cfg.optout_url ?? '').trim(), secret = String(cfg.optout_secret ?? '').trim();\nif (!/^https?:\\/\\/\\S+$/i.test(optUrl) || /YOUR-N8N-HOST/i.test(optUrl)) problems.push('optout_url in Config is not set: paste the Production URL of the \"Unsubscribe link\" node. No review requests were sent');\nif (secret.length < 16) problems.push('optout_secret in Config must be a random text of at least 16 characters. No review requests were sent');\nif (problems.length) return [report('Review requests', problems)];\nconst all = rowsOf('Read Visits');\nconst key = r => String(r.email ?? '').trim().toLowerCase();\nconst optedOut = new Set(all.filter(r => truthy(r.opt_out)).map(key).filter(Boolean));\nconst seen = new Set(all.filter(r => String(r.review_requested_at ?? '').trim() || String(r.review_status ?? '').trim() === 'sent' || sendState(r.review_status).claimed).map(key).filter(Boolean));\nfunction check(row, id) {\n  if (String(row.status ?? '').trim().toLowerCase() !== 'completed') return {};\n  if (String(row.review_requested_at ?? '').trim() || String(row.review_status ?? '').trim() === 'sent') return {};\n  const st = sendState(row.review_status);\n  if (st.claimed || st.gaveUp) return {};\n  const em = key(row);\n  if (!EMAIL_RE.test(em)) return {};\n  if (truthy(row.opt_out) || optedOut.has(em) || seen.has(em)) return {};\n  const end = parseDT(row.visit_end, String(row.timezone || cfg.timezone || 'UTC'));\n  if (!end.isValid) return { problem: `visit_end \"${row.visit_end ?? ''}\" can't be read (use yyyy-MM-dd HH:mm)` };\n  const age = now.diff(end, 'hours').hours;\n  if (age < delay || age > maxAge * 24) return {};\n  // Writes go to this exact sheet row, so an ID with stray spaces (or a number) can't miss its row.\n  const rowNumber = Number(row.row_number);\n  if (!Number.isInteger(rowNumber) || rowNumber < 2) return { problem: 'the sheet row number is missing, so the row could not be marked and nothing was sent. \"Read Visits\" must read the Visits tab with the column names in row 1' };\n  seen.add(em);\n  const name = String(row.client_name || 'there').trim();\n  // Signed link: no email address in the URL, and the token can't be guessed without optout_secret.\n  const token = hmacHex(secret, `optout|${id}|${em}`);\n  const optout = `${optUrl}${optUrl.includes('?') ? '&' : '?'}v=${encodeURIComponent(id)}&t=${token}`;\n  return { send: { _kind: 'send', row_number: rowNumber, visit_id: id, to_email: em, subject: `How was your visit to ${cfg.business_name}?`,\n    html: `<p>Hi ${esc(name)},</p><p>Thank you for visiting <b>${esc(cfg.business_name)}</b>. Would you take 30 seconds to leave us a review? It really helps a small business like ours.</p><p><a href=\"${esc(cfg.review_link)}\">Leave a review</a></p><p style=\"font-size:12px;color:#888\">Don't want these emails? <a href=\"${esc(optout)}\">Unsubscribe</a>.</p>`,\n    claim_status: claimToken(), fail_status: failStatus(st.attempts), review_requested_at: now.toUTC().toISO() } };\n}\nfor (const [id, group] of groupById(all, 'visit_id')) {\n  const results = group.map(row => check(row, id));\n  if (group.length > 1 && results.some(x => x.send || x.problem))\n    problems.push(`${id}: ${group.length} rows share this visit_id, only the first row is used. Give each row its own ID`);\n  if (results[0].problem) problems.push(`${id}: ${results[0].problem}`);\n  if (results[0].send) out.push({ json: results[0].send });\n}\nif (problems.length) out.push(report('Review requests', problems));\nreturn out;\n"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "8bb7358e-a3b5-549c-8880-69ec7efd2db9",
+      "name": "Send or report?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "8bb7358e-a3b5-549c-8880-69ec7efd2db9",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "send"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "bc530a27-ab08-5bdb-8c52-97731ee4277a",
+      "name": "Claim review request",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1264,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "02ca6252-4fe4-59e7-b3f6-83acdbc00838",
+              "name": "row_number",
+              "type": "string",
+              "value": "={{ $json.row_number }}"
+            },
+            {
+              "id": "7bc016d1-49f6-5628-9550-a127628ba772",
+              "name": "review_status",
+              "type": "string",
+              "value": "={{ $json.claim_status }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "a3d61f25-2765-546c-89fd-1c4b2337417d",
+      "name": "Save claim",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        1504,
+        0
+      ],
+      "parameters": {
+        "columns": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "row_number"
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        },
+        "operation": "update",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config').first().json.spreadsheet_url }}"
+        }
+      },
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "97504fdf-c782-5087-99fc-84d5c8d56ffd",
+      "name": "Wait for overlapping runs",
+      "type": "n8n-nodes-base.wait",
+      "position": [
+        1744,
+        0
+      ],
+      "parameters": {
+        "unit": "seconds",
+        "amount": 15,
+        "resume": "timeInterval"
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "2ed21e63-c430-5072-8189-43967d82df54",
+      "name": "Re-read Visits (claims)",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        1984,
+        0
+      ],
+      "parameters": {
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "date": "SERIAL_NUMBER",
+              "general": "UNFORMATTED_VALUE"
+            }
+          }
+        },
+        "operation": "read",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config').first().json.spreadsheet_url }}"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "79c7a7b3-69ad-5985-a582-b8d29e36a028",
+      "name": "Confirm claims",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        2224,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst cfg = $('Config').first().json;\nconst truthy = v => ['true','yes','y','1','x'].includes(String(v ?? '').trim().toLowerCase());\nconst esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst now = cfg.now ? DateTime.fromISO(String(cfg.now), { setZone: true }) : DateTime.now();\nconst EMAIL_RE = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\n// Dates: ISO text, yyyy-MM-dd HH:mm, Google Sheets serial numbers (e.g. 46316.33) and common formatted dates.\nconst FORMATS = ['yyyy-MM-dd H:mm', 'yyyy-MM-dd H:mm:ss', 'yyyy/MM/dd H:mm', 'yyyy/MM/dd H:mm:ss', 'yyyy/MM/dd',\n  'd LLL yyyy H:mm', 'd LLL yyyy', 'd LLLL yyyy H:mm', 'd LLLL yyyy', 'LLL d, yyyy h:mm a', 'LLL d, yyyy', 'LLLL d, yyyy h:mm a', 'LLLL d, yyyy',\n  'd.M.yyyy H:mm', 'd.M.yyyy H:mm:ss', 'd.M.yyyy'];\nfunction parseDT(v, zone) {\n  if (v === undefined || v === null || String(v).trim() === '') return DateTime.invalid('empty');\n  if (typeof v === 'number' || /^\\d{5}(\\.\\d+)?$/.test(String(v).trim())) {\n    const n = Number(v);\n    if (!(n > 20000 && n < 80000)) return DateTime.invalid('not a date serial number');\n    const u = DateTime.fromMillis(Math.round((n - 25569) * 86400000), { zone: 'UTC' });\n    return DateTime.fromObject({ year: u.year, month: u.month, day: u.day, hour: u.hour, minute: u.minute, second: u.second }, { zone });\n  }\n  const s = String(v).trim();\n  if (/[zZ]$|[+-]\\d\\d:?\\d\\d$/.test(s)) return DateTime.fromISO(s.replace(' ', 'T'), { setZone: true });\n  let d = DateTime.fromISO(s.replace(' ', 'T'), { zone });\n  for (const f of FORMATS) { if (d.isValid) break; d = DateTime.fromFormat(s, f, { zone, locale: 'en-US' }); }\n  if (!d.isValid) {\n    const m = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:[ T](\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp][Mm])?)?$/);\n    if (m) {\n      // 13/10/2026 is day-first and 10/13/2026 month-first; 10/11/2026 could be either, so it is rejected.\n      const a = +m[1], b = +m[2];\n      let month, day;\n      if (a > 12 && b <= 12) { day = a; month = b; } else if (b > 12 && a <= 12) { month = a; day = b; } else if (a === b) { month = a; day = b; }\n      else return DateTime.invalid('day/month order is ambiguous');\n      let h = m[4] ? +m[4] : 0;\n      if (m[7]) { const pm = /p/i.test(m[7]); if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }\n      d = DateTime.fromObject({ year: +m[3], month, day, hour: h, minute: m[5] ? +m[5] : 0, second: m[6] ? +m[6] : 0 }, { zone });\n    }\n  }\n  return d;\n}\nconst rowsOf = node => $(node).all().map(i => i.json).filter(r => r && Object.keys(r).length);\n\nconst MAX_ATTEMPTS = 3;\nfunction sendState(v) {\n  const s = String(v ?? '').trim().toLowerCase();\n  if (s.startsWith('sending')) return { claimed: true, attempts: 0, gaveUp: false };\n  const m = s.match(/^failed (\\d+)/);\n  const attempts = m ? parseInt(m[1], 10) : 0;\n  return { claimed: false, attempts, gaveUp: attempts >= MAX_ATTEMPTS };\n}\n// The persisted owner is this n8n execution ID, with a state prefix only.\nconst claimToken = () => `sending ${$execution.id}`;\nconst failStatus = attempts => attempts + 1 >= MAX_ATTEMPTS ? `failed ${MAX_ATTEMPTS}/${MAX_ATTEMPTS} - gave up` : `failed ${attempts + 1}/${MAX_ATTEMPTS}`;\n// Rows grouped by ID. Sheet updates always change the first row with a given ID, so only that row is used.\nfunction groupById(rows, key) {\n  const m = new Map();\n  for (const row of rows) { const id = String(row[key] ?? '').trim(); if (!id) continue; if (!m.has(id)) m.set(id, []); m.get(id).push(row); }\n  return m;\n}\nfunction report(title, problems) {\n  const text = `${title}: ${problems.length} row(s) need attention. ` + problems.join(' | ');\n  return { json: { _kind: 'report', alert_text: text, alert_subject: `[Alert] ${title}: ${problems.length} row(s) need attention`,\n    alert_html: `<p><b>${esc(title)}</b>: ${problems.length} row(s) need attention.</p><ul>` + problems.map(p => `<li>${esc(p)}</li>`).join('') + '</ul>' } };\n}\n\nconst WAIT_MS = 15 * 1000, LIMIT_MS = 13 * 1000;\n// At least the time this run took from reading the sheet to saving its marks (the wait is taken off again).\nconst elapsed = Date.now() - Number(cfg.run_started_ms) - WAIT_MS;\nconst fresh = new Map(rowsOf('Re-read Visits (claims)').map(r => [Number(r.row_number), r]));\nconst out = [], problems = [];\nfor (const s of $('Select visits to ask').all().map(i => i.json).filter(j => j._kind === 'send')) {\n  const row = fresh.get(Number(s.row_number)) || {};\n  const status = String(row.review_status ?? '').trim();\n  if (String(row.visit_id ?? '').trim() !== s.visit_id || String(row.email ?? '').trim().toLowerCase() !== String(s.to_email).toLowerCase()) {\n    problems.push(`${s.visit_id}: the sheet rows moved during the run (rows added, deleted or sorted?), so nothing was sent. Clear the review_status cell that says \"${s.claim_status}\" to let it run again`);\n  } else if (!(String(row.status ?? '').trim().toLowerCase() === 'completed' && !truthy(row.opt_out) && !rowsOf('Re-read Visits (claims)').some(r => String(r.email ?? '').trim().toLowerCase() === s.to_email && truthy(r.opt_out))) || (!!String(row.review_requested_at ?? '').trim())) {\n    problems.push(`${s.visit_id}: eligibility changed during the claim wait; nothing was sent. Check the sheet before retrying`);\n  } else if (status !== `sending ${$execution.id}` || status !== s.claim_status) {\n    problems.push(`${s.visit_id}: the \"sending\" mark could not be saved or this execution no longer owns review_status (it says \"${status}\"). Claim missing or mismatched; nothing was sent. Check the sheet before retrying`);\n  } else if (!(elapsed <= LIMIT_MS)) {\n    problems.push(`${s.visit_id}: saving the \"sending\" mark took ${Math.round(elapsed / 1000)} s (limit 13 s), so this run did not send it, in case another run did. Check whether the client got the email, then clear review_status to let it run again`);\n  } else out.push({ json: s });\n}\n// Fail the whole batch before any send if even one selected row has an unverified claim.\nif (problems.length) return [report('Review requests', problems)];\nreturn out;\n"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "927d16b5-35ad-5b9b-852b-c0705db1089b",
+      "name": "Claim confirmed?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        2464,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "927d16b5-35ad-5b9b-852b-c0705db1089b",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json._kind }}",
+              "rightValue": "send"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "8cfcc80f-8a43-5921-8ad4-7e322b2d67d5",
+      "name": "Prepare stop alert: claim not owned",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2704,
+        784
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2e5ece5d-f383-52c4-9194-1e02d009dd74",
+              "name": "message",
+              "type": "string",
+              "value": "={{ $json.alert_text }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "3b1865b3-f7c1-5a9f-a3d2-ba9562b54287",
+      "name": "Alert owner before stop: claim not owned",
+      "type": "n8n-nodes-base.emailSend",
+      "onError": "continueRegularOutput",
+      "position": [
+        2944,
+        784
+      ],
+      "parameters": {
+        "html": "={{ '<p>' + String($(\"Prepare stop alert: claim not owned\").first().json.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>' }}",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "={{ '[Alert] ' + String($(\"Prepare stop alert: claim not owned\").first().json.message).replace(/[\\r\\n]+/g, ' ').slice(0, 140) }}",
+        "toEmail": "={{ ($('Config').isExecuted ? $('Config').first().json.owner_email : $('Config').params.assignments.assignments.filter(a => a.name === 'owner_email').map(a => a.value)[0]) }}",
+        "fromEmail": "={{ ($('Config').isExecuted ? $('Config').first().json.from_email : $('Config').params.assignments.assignments.filter(a => a.name === 'from_email').map(a => a.value)[0]) }}",
+        "emailFormat": "html"
+      },
+      "typeVersion": 2.1
+    },
+    {
+      "id": "a5220410-c2e9-5187-b3bf-b0ccab0091fd",
+      "name": "Stop: claim not owned",
+      "type": "n8n-nodes-base.stopAndError",
+      "position": [
+        3184,
+        784
+      ],
+      "parameters": {
+        "errorMessage": "={{ '[Owner alert attempted] ' + String($(\"Prepare stop alert: claim not owned\").first().json.message) }}"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "b011056d-693a-50ec-b570-cc747e59f2ad",
+      "name": "Send review request",
+      "type": "n8n-nodes-base.emailSend",
+      "onError": "continueErrorOutput",
+      "position": [
+        2704,
+        0
+      ],
+      "parameters": {
+        "html": "={{ $('Confirm claims').item.json.html }}",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "={{ $('Confirm claims').item.json.subject }}",
+        "toEmail": "={{ $('Confirm claims').item.json.to_email }}",
+        "fromEmail": "={{ $('Config').first().json.from_email }}",
+        "emailFormat": "html"
+      },
+      "typeVersion": 2.1
+    },
+    {
+      "id": "5d1edd70-2cb6-5a38-affb-4d353cff7520",
+      "name": "Prepare sent flag",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2944,
+        0
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3e044876-559d-5c30-a65a-fe929880a70c",
+              "name": "row_number",
+              "type": "string",
+              "value": "={{ $('Confirm claims').item.json.row_number }}"
+            },
+            {
+              "id": "decc3302-59cf-5d00-932e-53bed209a764",
+              "name": "review_requested_at",
+              "type": "string",
+              "value": "={{ $('Confirm claims').item.json.review_requested_at }}"
+            },
+            {
+              "id": "b5efa6e0-0ded-551c-9424-6a773eae6aae",
+              "name": "review_status",
+              "type": "string",
+              "value": "sent"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "55c3696e-6c02-5bf8-aeba-c42383a5719d",
+      "name": "Mark review requested",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        3184,
+        0
+      ],
+      "parameters": {
+        "columns": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "row_number"
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        },
+        "operation": "update",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config').first().json.spreadsheet_url }}"
+        }
+      },
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "4cf19a46-fc8d-5c42-a4d2-f7253122aeb4",
+      "name": "Re-read Visits (sent)",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        3424,
+        0
+      ],
+      "parameters": {
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "date": "SERIAL_NUMBER",
+              "general": "UNFORMATTED_VALUE"
+            }
+          }
+        },
+        "operation": "read",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config').first().json.spreadsheet_url }}"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "4723d667-45c5-5543-983a-352e7a903731",
+      "name": "Confirm sent flags",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3664,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst cfg = $('Config').first().json;\nconst truthy = v => ['true','yes','y','1','x'].includes(String(v ?? '').trim().toLowerCase());\nconst esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst now = cfg.now ? DateTime.fromISO(String(cfg.now), { setZone: true }) : DateTime.now();\nconst EMAIL_RE = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\n// Dates: ISO text, yyyy-MM-dd HH:mm, Google Sheets serial numbers (e.g. 46316.33) and common formatted dates.\nconst FORMATS = ['yyyy-MM-dd H:mm', 'yyyy-MM-dd H:mm:ss', 'yyyy/MM/dd H:mm', 'yyyy/MM/dd H:mm:ss', 'yyyy/MM/dd',\n  'd LLL yyyy H:mm', 'd LLL yyyy', 'd LLLL yyyy H:mm', 'd LLLL yyyy', 'LLL d, yyyy h:mm a', 'LLL d, yyyy', 'LLLL d, yyyy h:mm a', 'LLLL d, yyyy',\n  'd.M.yyyy H:mm', 'd.M.yyyy H:mm:ss', 'd.M.yyyy'];\nfunction parseDT(v, zone) {\n  if (v === undefined || v === null || String(v).trim() === '') return DateTime.invalid('empty');\n  if (typeof v === 'number' || /^\\d{5}(\\.\\d+)?$/.test(String(v).trim())) {\n    const n = Number(v);\n    if (!(n > 20000 && n < 80000)) return DateTime.invalid('not a date serial number');\n    const u = DateTime.fromMillis(Math.round((n - 25569) * 86400000), { zone: 'UTC' });\n    return DateTime.fromObject({ year: u.year, month: u.month, day: u.day, hour: u.hour, minute: u.minute, second: u.second }, { zone });\n  }\n  const s = String(v).trim();\n  if (/[zZ]$|[+-]\\d\\d:?\\d\\d$/.test(s)) return DateTime.fromISO(s.replace(' ', 'T'), { setZone: true });\n  let d = DateTime.fromISO(s.replace(' ', 'T'), { zone });\n  for (const f of FORMATS) { if (d.isValid) break; d = DateTime.fromFormat(s, f, { zone, locale: 'en-US' }); }\n  if (!d.isValid) {\n    const m = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:[ T](\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp][Mm])?)?$/);\n    if (m) {\n      // 13/10/2026 is day-first and 10/13/2026 month-first; 10/11/2026 could be either, so it is rejected.\n      const a = +m[1], b = +m[2];\n      let month, day;\n      if (a > 12 && b <= 12) { day = a; month = b; } else if (b > 12 && a <= 12) { month = a; day = b; } else if (a === b) { month = a; day = b; }\n      else return DateTime.invalid('day/month order is ambiguous');\n      let h = m[4] ? +m[4] : 0;\n      if (m[7]) { const pm = /p/i.test(m[7]); if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }\n      d = DateTime.fromObject({ year: +m[3], month, day, hour: h, minute: m[5] ? +m[5] : 0, second: m[6] ? +m[6] : 0 }, { zone });\n    }\n  }\n  return d;\n}\nconst rowsOf = node => $(node).all().map(i => i.json).filter(r => r && Object.keys(r).length);\n\nconst MAX_ATTEMPTS = 3;\nfunction sendState(v) {\n  const s = String(v ?? '').trim().toLowerCase();\n  if (s.startsWith('sending')) return { claimed: true, attempts: 0, gaveUp: false };\n  const m = s.match(/^failed (\\d+)/);\n  const attempts = m ? parseInt(m[1], 10) : 0;\n  return { claimed: false, attempts, gaveUp: attempts >= MAX_ATTEMPTS };\n}\n// The persisted owner is this n8n execution ID, with a state prefix only.\nconst claimToken = () => `sending ${$execution.id}`;\nconst failStatus = attempts => attempts + 1 >= MAX_ATTEMPTS ? `failed ${MAX_ATTEMPTS}/${MAX_ATTEMPTS} - gave up` : `failed ${attempts + 1}/${MAX_ATTEMPTS}`;\n// Rows grouped by ID. Sheet updates always change the first row with a given ID, so only that row is used.\nfunction groupById(rows, key) {\n  const m = new Map();\n  for (const row of rows) { const id = String(row[key] ?? '').trim(); if (!id) continue; if (!m.has(id)) m.set(id, []); m.get(id).push(row); }\n  return m;\n}\nfunction report(title, problems) {\n  const text = `${title}: ${problems.length} row(s) need attention. ` + problems.join(' | ');\n  return { json: { _kind: 'report', alert_text: text, alert_subject: `[Alert] ${title}: ${problems.length} row(s) need attention`,\n    alert_html: `<p><b>${esc(title)}</b>: ${problems.length} row(s) need attention.</p><ul>` + problems.map(p => `<li>${esc(p)}</li>`).join('') + '</ul>' } };\n}\n\nconst fresh = new Map(rowsOf('Re-read Visits (sent)').map(r => [Number(r.row_number), r]));\nconst ids = new Map($('Confirm claims').all().map(i => [Number(i.json.row_number), i.json.visit_id]));\nconst missing = $('Prepare sent flag').all().map(i => i.json)\n  .filter(w => {\n    const row = fresh.get(Number(w.row_number)) || {};\n    return Object.entries(w).some(([k, v]) => k !== 'row_number' && String(row[k] ?? '') !== String(v ?? ''));\n  })\n  .map(w => ids.get(Number(w.row_number)) || `row ${w.row_number}`);\nreturn missing.length ? [report('Review requests', missing.map(id => `${id}: the email was sent, but one or more sent fields are not in the sheet. Check the mailbox and sheet before changing review_status`))] : [];\n"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "f813552f-d44c-579b-bd63-b199cf57c4ff",
+      "name": "Prepare failed attempt",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2944,
+        256
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "808b85d1-e98e-5e1a-8937-5825853ba820",
+              "name": "row_number",
+              "type": "string",
+              "value": "={{ $('Confirm claims').item.json.row_number }}"
+            },
+            {
+              "id": "ec9922a7-97cf-56c5-a0e1-a6cfa6f9ff60",
+              "name": "review_status",
+              "type": "string",
+              "value": "={{ $('Confirm claims').item.json.fail_status + ' - ' + String(($json.error && $json.error.message) || $json.error || 'unknown error').slice(0, 150) }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "0f446c18-067f-514c-996b-f85b5363ac96",
+      "name": "Save failed attempt",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        3184,
+        256
+      ],
+      "parameters": {
+        "columns": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "row_number"
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        },
+        "operation": "update",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config').first().json.spreadsheet_url }}"
+        }
+      },
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "46c95253-4834-5a8a-88e9-13c3720418b4",
+      "name": "Re-read Visits (failed)",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        3424,
+        256
+      ],
+      "parameters": {
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "date": "SERIAL_NUMBER",
+              "general": "UNFORMATTED_VALUE"
+            }
+          }
+        },
+        "operation": "read",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config').first().json.spreadsheet_url }}"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "c9e0e7c1-2141-5e6d-a923-f96340d8d1a0",
+      "name": "Alert: email owner",
+      "type": "n8n-nodes-base.emailSend",
+      "onError": "continueRegularOutput",
+      "position": [
+        1264,
+        784
+      ],
+      "parameters": {
+        "html": "={{ $json.alert_html }}",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "={{ $json.alert_subject }}",
+        "toEmail": "={{ ($('Config').isExecuted ? $('Config').first().json.owner_email : $('Config').params.assignments.assignments.filter(a => a.name === 'owner_email').map(a => a.value)[0]) }}",
+        "fromEmail": "={{ ($('Config').isExecuted ? $('Config').first().json.from_email : $('Config').params.assignments.assignments.filter(a => a.name === 'from_email').map(a => a.value)[0]) }}",
+        "emailFormat": "html"
+      },
+      "typeVersion": 2.1
+    },
+    {
+      "id": "b2396ce6-8e2c-5c81-8c35-6eca6d18b180",
+      "name": "Summarize failed sends",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        3664,
+        256
+      ],
+      "parameters": {
+        "jsCode": "\nconst cfg = $('Config').first().json;\nconst truthy = v => ['true','yes','y','1','x'].includes(String(v ?? '').trim().toLowerCase());\nconst esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst now = cfg.now ? DateTime.fromISO(String(cfg.now), { setZone: true }) : DateTime.now();\nconst EMAIL_RE = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;\n// Dates: ISO text, yyyy-MM-dd HH:mm, Google Sheets serial numbers (e.g. 46316.33) and common formatted dates.\nconst FORMATS = ['yyyy-MM-dd H:mm', 'yyyy-MM-dd H:mm:ss', 'yyyy/MM/dd H:mm', 'yyyy/MM/dd H:mm:ss', 'yyyy/MM/dd',\n  'd LLL yyyy H:mm', 'd LLL yyyy', 'd LLLL yyyy H:mm', 'd LLLL yyyy', 'LLL d, yyyy h:mm a', 'LLL d, yyyy', 'LLLL d, yyyy h:mm a', 'LLLL d, yyyy',\n  'd.M.yyyy H:mm', 'd.M.yyyy H:mm:ss', 'd.M.yyyy'];\nfunction parseDT(v, zone) {\n  if (v === undefined || v === null || String(v).trim() === '') return DateTime.invalid('empty');\n  if (typeof v === 'number' || /^\\d{5}(\\.\\d+)?$/.test(String(v).trim())) {\n    const n = Number(v);\n    if (!(n > 20000 && n < 80000)) return DateTime.invalid('not a date serial number');\n    const u = DateTime.fromMillis(Math.round((n - 25569) * 86400000), { zone: 'UTC' });\n    return DateTime.fromObject({ year: u.year, month: u.month, day: u.day, hour: u.hour, minute: u.minute, second: u.second }, { zone });\n  }\n  const s = String(v).trim();\n  if (/[zZ]$|[+-]\\d\\d:?\\d\\d$/.test(s)) return DateTime.fromISO(s.replace(' ', 'T'), { setZone: true });\n  let d = DateTime.fromISO(s.replace(' ', 'T'), { zone });\n  for (const f of FORMATS) { if (d.isValid) break; d = DateTime.fromFormat(s, f, { zone, locale: 'en-US' }); }\n  if (!d.isValid) {\n    const m = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:[ T](\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([AaPp][Mm])?)?$/);\n    if (m) {\n      // 13/10/2026 is day-first and 10/13/2026 month-first; 10/11/2026 could be either, so it is rejected.\n      const a = +m[1], b = +m[2];\n      let month, day;\n      if (a > 12 && b <= 12) { day = a; month = b; } else if (b > 12 && a <= 12) { month = a; day = b; } else if (a === b) { month = a; day = b; }\n      else return DateTime.invalid('day/month order is ambiguous');\n      let h = m[4] ? +m[4] : 0;\n      if (m[7]) { const pm = /p/i.test(m[7]); if (h === 12) h = pm ? 12 : 0; else if (pm) h += 12; }\n      d = DateTime.fromObject({ year: +m[3], month, day, hour: h, minute: m[5] ? +m[5] : 0, second: m[6] ? +m[6] : 0 }, { zone });\n    }\n  }\n  return d;\n}\nconst rowsOf = node => $(node).all().map(i => i.json).filter(r => r && Object.keys(r).length);\n\nconst MAX_ATTEMPTS = 3;\nfunction sendState(v) {\n  const s = String(v ?? '').trim().toLowerCase();\n  if (s.startsWith('sending')) return { claimed: true, attempts: 0, gaveUp: false };\n  const m = s.match(/^failed (\\d+)/);\n  const attempts = m ? parseInt(m[1], 10) : 0;\n  return { claimed: false, attempts, gaveUp: attempts >= MAX_ATTEMPTS };\n}\n// The persisted owner is this n8n execution ID, with a state prefix only.\nconst claimToken = () => `sending ${$execution.id}`;\nconst failStatus = attempts => attempts + 1 >= MAX_ATTEMPTS ? `failed ${MAX_ATTEMPTS}/${MAX_ATTEMPTS} - gave up` : `failed ${attempts + 1}/${MAX_ATTEMPTS}`;\n// Rows grouped by ID. Sheet updates always change the first row with a given ID, so only that row is used.\nfunction groupById(rows, key) {\n  const m = new Map();\n  for (const row of rows) { const id = String(row[key] ?? '').trim(); if (!id) continue; if (!m.has(id)) m.set(id, []); m.get(id).push(row); }\n  return m;\n}\nfunction report(title, problems) {\n  const text = `${title}: ${problems.length} row(s) need attention. ` + problems.join(' | ');\n  return { json: { _kind: 'report', alert_text: text, alert_subject: `[Alert] ${title}: ${problems.length} row(s) need attention`,\n    alert_html: `<p><b>${esc(title)}</b>: ${problems.length} row(s) need attention.</p><ul>` + problems.map(p => `<li>${esc(p)}</li>`).join('') + '</ul>' } };\n}\n\nconst fresh = new Map(rowsOf('Re-read Visits (failed)').map(r => [Number(r.row_number), r]));\nconst ids = new Map($('Confirm claims').all().map(i => [Number(i.json.row_number), i.json.visit_id]));\nconst items = $('Prepare failed attempt').all().map(i => i.json);\nconst idOf = w => ids.get(Number(w.row_number)) || `row ${w.row_number}`;\nconst gaveUp = items.filter(w => /gave up/i.test(String(w.review_status))).length;\nconst lost = items.filter(w => String((fresh.get(Number(w.row_number)) || {}).review_status ?? '').trim() !== String(w.review_status).trim()).map(idOf);\nconst text = `Review requests: ${items.length} email(s) could not be sent. ` + items.map(w => `${idOf(w)}: ${w.review_status}`).join(' | ') + '.' +\n  (gaveUp < items.length ? ' They are tried again on the next run (up to 3 attempts).' : '') +\n  (gaveUp ? ' Rows marked \"gave up\" are not tried again: fix the address, then clear review_status to retry.' : '') +\n  (lost.length ? ` The failed attempt is not in the sheet for ${lost.join(', ')}: those rows keep \"sending\" and are not tried again until you clear review_status.` : '');\nreturn [{ json: { attempt_saved: !lost.length, message: text, alert_text: text, alert_subject: `[Alert] Review requests: ${items.length} email(s) could not be sent`,\n  alert_html: '<p>' + text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>' } }];\n"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "abd48d4c-b09c-56f0-a3cd-b838935228a9",
+      "name": "Prepare stop alert: email not sent",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2704,
+        1024
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "62caf436-1769-51e4-966f-e9fdcfc1eabd",
+              "name": "message",
+              "type": "string",
+              "value": "={{ $json.message }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "977e6aec-e194-526d-8b30-c5dfbd83e914",
+      "name": "Alert owner before stop: email not sent",
+      "type": "n8n-nodes-base.emailSend",
+      "onError": "continueRegularOutput",
+      "position": [
+        2944,
+        1024
+      ],
+      "parameters": {
+        "html": "={{ '<p>' + String($(\"Prepare stop alert: email not sent\").first().json.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>' }}",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "={{ '[Alert] ' + String($(\"Prepare stop alert: email not sent\").first().json.message).replace(/[\\r\\n]+/g, ' ').slice(0, 140) }}",
+        "toEmail": "={{ ($('Config').isExecuted ? $('Config').first().json.owner_email : $('Config').params.assignments.assignments.filter(a => a.name === 'owner_email').map(a => a.value)[0]) }}",
+        "fromEmail": "={{ ($('Config').isExecuted ? $('Config').first().json.from_email : $('Config').params.assignments.assignments.filter(a => a.name === 'from_email').map(a => a.value)[0]) }}",
+        "emailFormat": "html"
+      },
+      "typeVersion": 2.1
+    },
+    {
+      "id": "b7fec708-e8a4-5d34-82e6-401cb923a2c2",
+      "name": "Stop: email not sent",
+      "type": "n8n-nodes-base.stopAndError",
+      "position": [
+        3184,
+        1024
+      ],
+      "parameters": {
+        "errorMessage": "={{ '[Owner alert attempted] ' + String($(\"Prepare stop alert: email not sent\").first().json.message) }}"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "882593fa-72d9-588d-a712-b9074d6ba469",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "position": [
+        544,
+        784
+      ],
+      "parameters": {},
+      "typeVersion": 1
+    },
+    {
+      "id": "a8630637-7168-5d45-9cab-63e2d67ded25",
+      "name": "Skip owner alert already attempted",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        784,
+        784
+      ],
+      "parameters": {
+        "jsCode": "\nconst event = $input.first().json;\nconst execution = event.execution || {};\nconst last = String(execution.lastNodeExecuted || '');\nconst message = String((execution.error || {}).message || '');\nlet inlineStop = false;\nif (last.startsWith('Stop:') && message.startsWith('[Owner alert attempted] ')) {\n  try {\n    // params is available without execution data, including in this separate error run.\n    const savedExpression = String($(last).params.errorMessage || '');\n    inlineStop = savedExpression.startsWith(\"={{ '[Owner alert attempted] ' + \");\n  } catch (_) { /* Unknown/unavailable source node: keep the ordinary error alert. */ }\n}\nreturn inlineStop ? [] : $input.all();\n"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "49ae0729-d001-5d9a-ab4e-44a3c596ae6f",
+      "name": "Alert text: workflow error",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1024,
+        784
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a099e777-a348-57fd-b2d5-2e0e2d491598",
+              "name": "alert_text",
+              "type": "string",
+              "value": "={{ 'Workflow \"' + (($json.workflow || {}).name || 'unknown') + '\" stopped with an error at \"' + (($json.execution || {}).lastNodeExecuted || 'unknown step') + '\": ' + ((($json.execution || $json.trigger || {}).error || {}).message || 'unknown error') + '. Check the sheet before you run it again. ' + (($json.execution || {}).url || '') }}"
+            },
+            {
+              "id": "6de32fce-8364-5cc8-a425-5f1a2c4e7a81",
+              "name": "alert_subject",
+              "type": "string",
+              "value": "={{ '[Alert] ' + String('Workflow \"' + (($json.workflow || {}).name || 'unknown') + '\" stopped with an error at \"' + (($json.execution || {}).lastNodeExecuted || 'unknown step') + '\": ' + ((($json.execution || $json.trigger || {}).error || {}).message || 'unknown error') + '. Check the sheet before you run it again. ' + (($json.execution || {}).url || '')).slice(0, 120) }}"
+            },
+            {
+              "id": "14a9a43f-d24a-5cc6-bfe5-939d64308424",
+              "name": "alert_html",
+              "type": "string",
+              "value": "={{ '<p>' + String('Workflow \"' + (($json.workflow || {}).name || 'unknown') + '\" stopped with an error at \"' + (($json.execution || {}).lastNodeExecuted || 'unknown step') + '\": ' + ((($json.execution || $json.trigger || {}).error || {}).message || 'unknown error') + '. Check the sheet before you run it again. ' + (($json.execution || {}).url || '')).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>' }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "0e2c97b6-fb8b-52f1-8115-1f83ba9aa95f",
+      "name": "Unsubscribe link",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        0,
+        1856
+      ],
+      "parameters": {
+        "path": "review-unsubscribe",
+        "options": {},
+        "httpMethod": "GET",
+        "responseMode": "responseNode"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "0bf3aa5f-a416-5aba-a1c4-e0ee11808ea2",
+      "name": "Unsubscribe confirm",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        0,
+        2096
+      ],
+      "parameters": {
+        "path": "review-unsubscribe",
+        "options": {},
+        "httpMethod": "POST",
+        "responseMode": "responseNode"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "e92c002e-054a-551c-b9a2-d299b02c6446",
+      "name": "Config (opt-out)",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        240,
+        1984
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "518d234d-9e2e-5361-ad75-516b620d7a5f",
+              "name": "spreadsheet_url",
+              "type": "string",
+              "value": "={{ $('Config').params.assignments.assignments.filter(a => a.name === 'spreadsheet_url').map(a => a.value)[0] }}"
+            },
+            {
+              "id": "f9ab0b8a-839e-5c20-afbf-12e486a57ca7",
+              "name": "optout_secret",
+              "type": "string",
+              "value": "={{ $('Config').params.assignments.assignments.filter(a => a.name === 'optout_secret').map(a => a.value)[0] }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "271be2db-710b-5611-bd48-2492c1fcbfd5",
+      "name": "Read Visits (opt-out)",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        480,
+        1984
+      ],
+      "parameters": {
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "date": "SERIAL_NUMBER",
+              "general": "UNFORMATTED_VALUE"
+            }
+          }
+        },
+        "operation": "read",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config (opt-out)').first().json.spreadsheet_url }}"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "fa4478a1-0883-5eed-890e-a61960324e36",
+      "name": "Check unsubscribe link",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        720,
+        1984
+      ],
+      "parameters": {
+        "jsCode": "\nfunction hmacHex(key, msg) {\n  const bytes = s => { const u = unescape(encodeURIComponent(String(s))); const a = []; for (let i = 0; i < u.length; i++) a.push(u.charCodeAt(i)); return a; };\n  const sha256 = data => {\n    const rr = (v, n) => (v >>> n) | (v << (32 - n)), H = [], K = [];\n    for (let c = 2, n = 0; n < 64; c++) {\n      let prime = true; for (let d = 2; d * d <= c; d++) if (c % d === 0) { prime = false; break; }\n      if (!prime) continue;\n      if (n < 8) H[n] = (Math.pow(c, 1 / 2) * 4294967296) | 0;\n      K[n++] = (Math.pow(c, 1 / 3) * 4294967296) | 0;\n    }\n    const m = data.slice(), len = data.length * 8;\n    m.push(0x80); while (m.length % 64 !== 56) m.push(0);\n    const hi = Math.floor(len / 4294967296), lo = len >>> 0;\n    for (const v of [hi, lo]) m.push((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255);\n    for (let o = 0; o < m.length; o += 64) {\n      const w = [];\n      for (let i = 0; i < 16; i++) w[i] = (m[o + 4 * i] << 24) | (m[o + 4 * i + 1] << 16) | (m[o + 4 * i + 2] << 8) | m[o + 4 * i + 3];\n      for (let i = 16; i < 64; i++) w[i] = (w[i - 16] + (rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3)) + w[i - 7] + (rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10))) | 0;\n      let [a, b, c, d, e, f, g, h] = H;\n      for (let i = 0; i < 64; i++) {\n        const t1 = (h + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;\n        const t2 = ((rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;\n        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;\n      }\n      [a, b, c, d, e, f, g, h].forEach((v, i) => { H[i] = (H[i] + v) | 0; });\n    }\n    const out = []; for (const v of H) out.push((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255);\n    return out;\n  };\n  let k = bytes(key); if (k.length > 64) k = sha256(k);\n  while (k.length < 64) k.push(0);\n  const inner = sha256(k.map(x => x ^ 0x36).concat(bytes(msg)));\n  return sha256(k.map(x => x ^ 0x5c).concat(inner)).map(x => (x < 16 ? '0' : '') + x.toString(16)).join('');\n}\n\nconst truthy = v => ['true','yes','y','1','x'].includes(String(v ?? '').trim().toLowerCase());\nconst esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\nconst isPost = $('Unsubscribe confirm').isExecuted;\nconst req = (isPost ? $('Unsubscribe confirm') : $('Unsubscribe link')).first().json;\nconst q = req.query || {}, b = (req.body && typeof req.body === 'object') ? req.body : {};\nconst v = String(q.v ?? b.v ?? '').trim(), t = String(q.t ?? b.t ?? '').trim().toLowerCase();\nconst secret = String($('Config (opt-out)').first().json.optout_secret ?? '').trim();\nconst rows = $('Read Visits (opt-out)').all().map(i => i.json).filter(r => r && Object.keys(r).length);\nconst row = v ? rows.find(r => String(r.visit_id ?? '').trim() === v) : undefined;\nconst em = row ? String(row.email ?? '').trim().toLowerCase() : '';\nconst valid = !!em && secret.length >= 16 && /^[0-9a-f]{64}$/.test(t) && hmacHex(secret, `optout|${v}|${em}`) === t;\nif (!valid) return [{ json: { step: 'invalid' } }];\nif (!isPost) {\n  // A GET (or a mail scanner following the link) only shows this page; nothing changes until the button is clicked.\n  const page = `<html><body style=\"font-family:sans-serif;max-width:480px;margin:60px auto\"><h2>Unsubscribe from review requests?</h2><p>Click the button to stop review request emails from us.</p>` +\n    `<form method=\"post\" action=\"?v=${encodeURIComponent(v)}&amp;t=${t}\"><input type=\"hidden\" name=\"v\" value=\"${esc(v)}\"><input type=\"hidden\" name=\"t\" value=\"${t}\">` +\n    `<button type=\"submit\" style=\"font-size:16px;padding:10px 18px\">Unsubscribe</button></form></body></html>`;\n  return [{ json: { step: 'confirm', page } }];\n}\n// Saved by sheet row number, so every row with this email is updated (even rows that share a visit_id).\nconst upd = rows.filter(r => String(r.email ?? '').trim().toLowerCase() === em && !truthy(r.opt_out) && Number(r.row_number) >= 2)\n               .map(r => ({ json: { step: 'save', row_number: Number(r.row_number), visit_id: String(r.visit_id), opt_out: 'TRUE' } }));\nreturn upd.length ? upd : [{ json: { step: 'done' } }];\n"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "480856da-3afd-50a3-94f2-90063e2c51ae",
+      "name": "Opt-out step",
+      "type": "n8n-nodes-base.switch",
+      "position": [
+        960,
+        1984
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "outputKey": "invalid",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "f70ba584-bfc8-5d36-8a4a-ad4d02aaca7b",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.step }}",
+                    "rightValue": "invalid"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "confirm",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "5261bf3c-b695-5d5f-a187-d69733383796",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.step }}",
+                    "rightValue": "confirm"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "save",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "d06d0bdc-224b-52b0-8725-ce2d4292a782",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.step }}",
+                    "rightValue": "save"
+                  }
+                ]
+              },
+              "renameOutput": true
+            },
+            {
+              "outputKey": "done",
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "a9637371-2093-5da6-8dc0-8e009bb078f7",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $json.step }}",
+                    "rightValue": "done"
+                  }
+                ]
+              },
+              "renameOutput": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "typeVersion": 3.2
+    },
+    {
+      "id": "ad5357d2-1d9f-565d-995b-7f9a1a1ad039",
+      "name": "Show invalid link page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [
+        1264,
+        1536
+      ],
+      "parameters": {
+        "options": {
+          "responseCode": 403,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        },
+        "respondWith": "text",
+        "responseBody": "<html><body style=\"font-family:sans-serif;max-width:480px;margin:60px auto\"><h2>This link is not valid</h2><p>The unsubscribe link is incomplete or has been changed. To stop these emails, reply to one of them and ask us to remove you.</p></body></html>"
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "b4d23063-a0b1-5e65-a313-36302098a4ad",
+      "name": "Show confirm page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [
+        1264,
+        1760
+      ],
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        },
+        "respondWith": "text",
+        "responseBody": "={{ $json.page }}"
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "1ad7d2fd-2d2f-5231-b7de-f5a0f3ff1234",
+      "name": "Prepare opt-out rows",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1264,
+        2208
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "13b5f42f-0f01-51e1-b5fa-2263027f5a73",
+              "name": "row_number",
+              "type": "string",
+              "value": "={{ $json.row_number }}"
+            },
+            {
+              "id": "4addb477-07da-5876-ad58-bc760eb2c82d",
+              "name": "opt_out",
+              "type": "string",
+              "value": "TRUE"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "a0021aa0-6cce-52b6-ab7a-8e6d582a8a02",
+      "name": "Save opt-out",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        1504,
+        2208
+      ],
+      "parameters": {
+        "columns": {
+          "value": {},
+          "schema": [],
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "row_number"
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        },
+        "operation": "update",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config (opt-out)').first().json.spreadsheet_url }}"
+        }
+      },
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "dee87030-d238-5801-a9b5-a7fcc946e04a",
+      "name": "Re-read Visits (opt-out saved)",
+      "type": "n8n-nodes-base.googleSheets",
+      "maxTries": 3,
+      "position": [
+        1744,
+        2208
+      ],
+      "parameters": {
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "date": "SERIAL_NUMBER",
+              "general": "UNFORMATTED_VALUE"
+            }
+          }
+        },
+        "operation": "read",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Visits"
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Config (opt-out)').first().json.spreadsheet_url }}"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "dd2e24f1-5355-564f-bdca-f98cb5ffad6c",
+      "name": "Verify opt-out saved",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1984,
+        2208
+      ],
+      "parameters": {
+        "jsCode": "\nconst fresh = new Map($('Re-read Visits (opt-out saved)').all().map(i => [Number(i.json.row_number), i.json]));\nconst missing = $('Prepare opt-out rows').all().map(i => i.json).filter(w =>\n  !['true','yes','y','1','x'].includes(String((fresh.get(Number(w.row_number)) || {}).opt_out ?? '').trim().toLowerCase()));\nreturn [{ json: { saved: !missing.length, message: 'Opt-out update not in the sheet for rows ' + missing.map(w => w.row_number).join(', ') + '; check the Visits tab before retrying' } }];\n"
+      },
+      "typeVersion": 2
+    },
+    {
+      "id": "4f52e6e7-f01f-5513-b402-f5a1d80a234d",
+      "name": "Opt-out saved?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        2224,
+        2208
+      ],
+      "parameters": {
+        "options": {},
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "4f52e6e7-f01f-5513-b402-f5a1d80a234d",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.saved }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 2.2
+    },
+    {
+      "id": "fbf662b6-942f-5d9b-9624-53ff2d923686",
+      "name": "Prepare stop alert: opt-out not saved",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        2464,
+        2416
+      ],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5a3a8681-461e-5a0c-95da-1369e308760e",
+              "name": "message",
+              "type": "string",
+              "value": "={{ $json.message }}"
+            }
+          ]
+        }
+      },
+      "typeVersion": 3.4
+    },
+    {
+      "id": "7b58b524-9d30-5487-9bee-77ea46d6fede",
+      "name": "Alert owner before stop: opt-out not saved",
+      "type": "n8n-nodes-base.emailSend",
+      "onError": "continueRegularOutput",
+      "position": [
+        2704,
+        2416
+      ],
+      "parameters": {
+        "html": "={{ '<p>' + String($(\"Prepare stop alert: opt-out not saved\").first().json.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>' }}",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "={{ '[Alert] ' + String($(\"Prepare stop alert: opt-out not saved\").first().json.message).replace(/[\\r\\n]+/g, ' ').slice(0, 140) }}",
+        "toEmail": "={{ ($('Config').isExecuted ? $('Config').first().json.owner_email : $('Config').params.assignments.assignments.filter(a => a.name === 'owner_email').map(a => a.value)[0]) }}",
+        "fromEmail": "={{ ($('Config').isExecuted ? $('Config').first().json.from_email : $('Config').params.assignments.assignments.filter(a => a.name === 'from_email').map(a => a.value)[0]) }}",
+        "emailFormat": "html"
+      },
+      "typeVersion": 2.1
+    },
+    {
+      "id": "0bc03d33-77de-5407-a072-7cef480d1c4c",
+      "name": "Stop: opt-out not saved",
+      "type": "n8n-nodes-base.stopAndError",
+      "position": [
+        2944,
+        2416
+      ],
+      "parameters": {
+        "errorMessage": "={{ '[Owner alert attempted] ' + String($(\"Prepare stop alert: opt-out not saved\").first().json.message) }}"
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "7bec13d1-2bee-57a7-bfa3-126324d802bd",
+      "name": "Show unsubscribed page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [
+        2464,
+        1984
+      ],
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        },
+        "respondWith": "text",
+        "responseBody": "<html><body style=\"font-family:sans-serif;max-width:480px;margin:60px auto\"><h2>You're unsubscribed</h2><p>You won't receive review requests from us again.</p></body></html>"
+      },
+      "typeVersion": 1.1
+    },
+    {
+      "id": "69f47290-8383-5fd0-b471-02bf25d89c55",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -880,
+        -192
+      ],
+      "parameters": {
+        "width": 740,
+        "height": 784,
+        "content": "## Post-visit Google review requests with opt-out\n\nEmails each client a link to your Google review page after a completed visit, and never asks anyone who opted out.\n\n### How it works\n1. Every hour, the workflow reads the `Visits` tab of your Google Sheet.\n2. It picks completed visits that ended at least `delay_hours` ago and no more than `max_age_days` ago. It skips clients who were already asked or opted out, and emails each address only once per run. Nothing is sent during quiet hours (21:00 to 08:00 by default).\n3. Before sending, it writes `sending <execution ID>` into `review_status`, waits 15 seconds and checks that the row still holds exactly that value. If it doesn't, the owner gets an email and the run stops. After sending, it saves `review_requested_at` and reads it back. A failed send is tried again on later runs, up to 3 attempts in total.\n4. The unsubscribe link in each email is signed. It opens a confirmation page, and clicking **Unsubscribe** sets `opt_out` to TRUE on every row with that email.\n\n### Setup\n1. Create a `Visits` tab with the columns `visit_id, client_name, email, visit_end, timezone, status, review_requested_at, opt_out, review_status`.\n2. Connect your Google Sheets and SMTP credentials on the nodes that ask for them.\n3. In **Config**, set the sheet URL, timezone, sender, owner email, review link and a random `optout_secret`. Copy the Production URL of **Unsubscribe link** into `optout_url`. Nothing is sent until both are set.\n4. Set the same timezone in the workflow settings. Test while the workflow is inactive, then activate it. Don't start manual runs while the schedule is active.\n\n### Limits\n- The duplicate-send check works through the sheet, so it's best effort, not a hard lock.\n- Runs start an hour apart and each one times out after 5 minutes, so they shouldn't overlap.\n- Don't add, delete or sort rows while a run is going.\n- If a run times out or n8n restarts mid-run, check the execution, your mailbox and the sheet before you clear a `sending` claim.\n\n### Customize\nChange the email wording in **Select visits to ask**, or the schedule in **Every hour**."
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "1763802c-e9e9-5914-8cf7-3014fc5b675b",
+      "name": "Section: 1. Find completed visits that are ready",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -96,
+        -192
+      ],
+      "parameters": {
+        "color": 7,
+        "width": 1240,
+        "height": 440,
+        "content": "## 1. Find completed visits that are ready\nLoads **Config**, reads the `Visits` tab and picks the visits to ask. Rows that can't be used, such as an unreadable `visit_end` or a repeated `visit_id`, are sent to the owner in one alert (section 3)."
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "0680de18-7e06-5608-86a7-3d1c74364f92",
+      "name": "Section: 2. Claim the row, confirm, send and mark it",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1184,
+        -192
+      ],
+      "parameters": {
+        "color": 7,
+        "width": 2680,
+        "height": 680,
+        "content": "## 2. Claim the row, confirm, send and mark it\nEach row is claimed with `sending <execution ID>`, read again after 15 seconds and emailed only if this run still owns the claim. Sent and failed results are saved, then read back to check they were stored."
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "217c5fb2-2f71-521c-970e-4d365886b23d",
+      "name": "Section: 3. Alerts",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -96,
+        576
+      ],
+      "parameters": {
+        "color": 7,
+        "width": 3960,
+        "height": 660,
+        "content": "## 3. Alerts\nEmails the owner about rows that need attention and about workflow errors. If a claim or a saved result can't be confirmed, or an email isn't sent, the owner is emailed first and the run then stops with an error."
+      },
+      "typeVersion": 1
+    },
+    {
+      "id": "a6140dad-4b4f-5101-a63b-37f72937c192",
+      "name": "Section: 4. Unsubscribe (confirm, then save)",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -96,
+        1344
+      ],
+      "parameters": {
+        "color": 7,
+        "width": 3240,
+        "height": 1300,
+        "content": "## 4. Unsubscribe (confirm, then save)\nThe signed link in each email opens a confirmation page. Clicking **Unsubscribe** sets `opt_out` to TRUE on every row with that email and reads the sheet back. If the change isn't stored, the owner is emailed and the run stops."
+      },
+      "typeVersion": 1
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "timezone": "America/New_York",
+    "executionOrder": "v1",
+    "executionTimeout": 300,
+    "saveManualExecutions": true
+  },
+  "connections": {
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Read Visits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save claim": {
+      "main": [
+        [
+          {
+            "node": "Wait for overlapping runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Visits": {
+      "main": [
+        [
+          {
+            "node": "Select visits to ask",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opt-out step": {
+      "main": [
+        [
+          {
+            "node": "Show invalid link page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show confirm page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare opt-out rows",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show unsubscribed page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save opt-out": {
+      "main": [
+        [
+          {
+            "node": "Re-read Visits (opt-out saved)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm claims": {
+      "main": [
+        [
+          {
+            "node": "Claim confirmed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opt-out saved?": {
+      "main": [
+        [
+          {
+            "node": "Show unsubscribed page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare stop alert: opt-out not saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send or report?": {
+      "main": [
+        [
+          {
+            "node": "Claim review request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: email owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim confirmed?": {
+      "main": [
+        [
+          {
+            "node": "Send review request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare stop alert: claim not owned",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config (opt-out)": {
+      "main": [
+        [
+          {
+            "node": "Read Visits (opt-out)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unsubscribe link": {
+      "main": [
+        [
+          {
+            "node": "Config (opt-out)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On workflow error": {
+      "main": [
+        [
+          {
+            "node": "Skip owner alert already attempted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare sent flag": {
+      "main": [
+        [
+          {
+            "node": "Mark review requested",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirm sent flags": {
+      "main": [
+        [
+          {
+            "node": "Prepare stop alert: claim not owned",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save failed attempt": {
+      "main": [
+        [
+          {
+            "node": "Re-read Visits (failed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send review request": {
+      "main": [
+        [
+          {
+            "node": "Prepare sent flag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare failed attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unsubscribe confirm": {
+      "main": [
+        [
+          {
+            "node": "Config (opt-out)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim review request": {
+      "main": [
+        [
+          {
+            "node": "Save claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare opt-out rows": {
+      "main": [
+        [
+          {
+            "node": "Save opt-out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select visits to ask": {
+      "main": [
+        [
+          {
+            "node": "Send or report?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify opt-out saved": {
+      "main": [
+        [
+          {
+            "node": "Opt-out saved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark review requested": {
+      "main": [
+        [
+          {
+            "node": "Re-read Visits (sent)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-read Visits (sent)": {
+      "main": [
+        [
+          {
+            "node": "Confirm sent flags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Visits (opt-out)": {
+      "main": [
+        [
+          {
+            "node": "Check unsubscribe link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check unsubscribe link": {
+      "main": [
+        [
+          {
+            "node": "Opt-out step",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare failed attempt": {
+      "main": [
+        [
+          {
+            "node": "Save failed attempt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize failed sends": {
+      "main": [
+        [
+          {
+            "node": "Prepare stop alert: email not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-read Visits (claims)": {
+      "main": [
+        [
+          {
+            "node": "Confirm claims",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-read Visits (failed)": {
+      "main": [
+        [
+          {
+            "node": "Summarize failed sends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for overlapping runs": {
+      "main": [
+        [
+          {
+            "node": "Re-read Visits (claims)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert text: workflow error": {
+      "main": [
+        [
+          {
+            "node": "Alert: email owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Re-read Visits (opt-out saved)": {
+      "main": [
+        [
+          {
+            "node": "Verify opt-out saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare stop alert: email not sent": {
+      "main": [
+        [
+          {
+            "node": "Alert owner before stop: email not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip owner alert already attempted": {
+      "main": [
+        [
+          {
+            "node": "Alert text: workflow error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare stop alert: claim not owned": {
+      "main": [
+        [
+          {
+            "node": "Alert owner before stop: claim not owned",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare stop alert: opt-out not saved": {
+      "main": [
+        [
+          {
+            "node": "Alert owner before stop: opt-out not saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert owner before stop: email not sent": {
+      "main": [
+        [
+          {
+            "node": "Stop: email not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert owner before stop: claim not owned": {
+      "main": [
+        [
+          {
+            "node": "Stop: claim not owned",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert owner before stop: opt-out not saved": {
+      "main": [
+        [
+          {
+            "node": "Stop: opt-out not saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
